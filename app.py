@@ -7,7 +7,7 @@ import datetime
 # --- 1. PROFESSIONAL UI CONFIGURATION ---
 st.set_page_config(page_title="2026 Mission Control", page_icon="🚀", layout="centered")
 
-# Restoring the original Transparent / Dark Theme CSS
+# Custom CSS for the "Locked Button" Transparent UI
 st.markdown("""
     <style>
     .main { background-color: #0e1117; }
@@ -26,12 +26,16 @@ st.markdown("""
         background-color: #21262d;
         transform: translateY(-2px);
     }
+    /* Style for disabled buttons to make them look "Locked/Transparent" */
+    .stButton>button:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+        border-color: #238636;
+        color: #8b949e;
+    }
     h1 { color: #58a6ff; font-family: 'Inter', sans-serif; }
     </style>
     """, unsafe_allow_html=True)
-
-st.title("🚀 2026 Mission Control")
-st.caption("Consistency is the bridge between goals and accomplishment.")
 
 # --- 2. THE DIRECT CLOUD CONNECTION ---
 scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -61,6 +65,7 @@ if sheet:
     clean_dates = [str(d).strip() for d in dates_row]
 
     col_idx = None
+    current_fmt = None
     for fmt in possible_formats:
         if fmt in clean_dates:
             col_idx = clean_dates.index(fmt) + 1
@@ -68,16 +73,16 @@ if sheet:
             break
 
     if col_idx:
-        # Fetch data for tasks and current statuses
+        # Fetching Tasks and Statuses
         tasks = sheet.col_values(1)[1:17] 
         current_status = sheet.col_values(col_idx)[1:17]
         
-        # --- 4. A-B-C-D STATS (FIXED LOGIC) ---
+        # --- 4. A-B-C-D STATS (Using A1 Notation to prevent crash) ---
         start_col = max(2, col_idx - 9)
         range_to_fetch = f"{rowcol_to_a1(2, start_col)}:{rowcol_to_a1(17, col_idx)}"
         history_range = sheet.get(range_to_fetch)
-        
         flat_history = [item for sublist in history_range for item in sublist]
+        
         stats = {
             "A (High)": flat_history.count("A"),
             "B (Med)": flat_history.count("B"),
@@ -85,51 +90,51 @@ if sheet:
             "D (Done)": flat_history.count("D")
         }
 
-        # --- 5. SIDEBAR & PROGRESS ---
+        # --- 5. PROGRESS & SIDEBAR ---
         completed_count = current_status.count("TRUE") + current_status.count("D")
         progress_perc = min(completed_count / 16, 1.0)
         
-        st.sidebar.metric("Today's Progress", f"{int(progress_perc * 100)}%")
-        st.sidebar.progress(progress_perc)
-        
-        st.sidebar.divider()
-        st.sidebar.subheader("📊 10-Day Intensity")
-        for label, val in stats.items():
-            st.sidebar.write(f"{label}: **{val}**")
+        with st.sidebar:
+            st.metric("Today's Progress", f"{int(progress_perc * 100)}%")
+            st.progress(progress_perc)
+            st.divider()
+            st.subheader("📊 10-Day Intensity")
+            for label, val in stats.items():
+                st.write(f"{label}: **{val}**")
+            if st.button("🔄 Refresh Data"):
+                st.rerun()
 
-        if st.sidebar.button("🔄 Refresh Data"):
-            st.rerun()
+        # --- 6. THE DASHBOARD UI ---
+        st.title("🚀 2026 Mission Control")
+        # Keep the header you liked
+        st.write(f"Logged as: `{current_fmt}` | Active Station: `{today.strftime('%A')}`")
 
-        # --- 6. DASHBOARD UI (Transparent Buttons) ---
-        st.subheader(f"Today's Objectives")
+        if progress_perc == 1.0:
+            st.balloons()
+            st.success("Target Achieved. Mission for the day is complete.")
+
+        st.subheader("Today's Objectives")
         
+        # Grid layout for buttons
         col1, col2 = st.columns(2)
         
         for i, task in enumerate(tasks):
-            # Check if task is done (TRUE or D)
-            is_done = False
-            if i < len(current_status):
-                if current_status[i] in ["TRUE", "D"]:
-                    is_done = True
+            # Checking if the task is done
+            is_done = i < len(current_status) and (current_status[i] in ["TRUE", "D"])
             
-            # Label logic: Fire icon for done, empty square for pending
-            label = f"🔥 {task}" if is_done else f"◽ {task}"
+            # Label changes based on completion
+            btn_label = f"🔥 {task}" if is_done else f"◽ {task}"
             
-            # Use columns for grid
             target_col = col1 if i % 2 == 0 else col2
             
-            # If button is clicked, update sheet and refresh
-            if target_col.button(label, key=f"btn_{i}", use_container_width=True, disabled=is_done):
+            # The Transparent/Locked Button Logic
+            if target_col.button(btn_label, key=f"btn_{i}", use_container_width=True, disabled=is_done):
                 with st.spinner("Syncing..."):
                     sheet.update_cell(i + 2, col_idx, "TRUE")
                     st.toast(f"{task} Logged!", icon="✅")
                     st.rerun()
-
-        if progress_perc == 1.0:
-            st.balloons()
-
     else:
-        st.warning(f"⚠️ Date {today.strftime('%d/%m/%Y')} not found in Row 1.")
+        st.error(f"Date {today.strftime('%-d/%-m/%Y')} not found. Check Row 1.")
 
 # --- 7. FOOTER ---
 st.divider()
