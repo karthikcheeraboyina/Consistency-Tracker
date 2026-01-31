@@ -77,17 +77,26 @@ if sheet:
         tasks = sheet.col_values(1)[1:17] 
         current_status = sheet.col_values(col_idx)[1:17]
         
-        # --- 4. A-B-C-D STATS (Using A1 Notation to prevent crash) ---
+        # --- 4. A-B-C-D STATS (Improved for empty spaces) ---
         start_col = max(2, col_idx - 9)
         range_to_fetch = f"{rowcol_to_a1(2, start_col)}:{rowcol_to_a1(17, col_idx)}"
-        history_range = sheet.get(range_to_fetch)
-        flat_history = [item for sublist in history_range for item in sublist]
         
+        # Get raw data from the sheet
+        history_range = sheet.get(range_to_fetch)
+        
+        # CLEANING LOGIC: Flatten the list and remove leading/trailing spaces
+        # This ensures "A " becomes "A" so it can be counted correctly
+        flat_history = []
+        for row in history_range:
+            for cell in row:
+                flat_history.append(str(cell).strip().upper())
+        
+        # Recalculate stats with cleaned data
         stats = {
             "A (High)": flat_history.count("A"),
             "B (Med)": flat_history.count("B"),
             "C (Low)": flat_history.count("C"),
-            "D (Done)": flat_history.count("D")
+            "D (Done)": flat_history.count("D") + flat_history.count("TRUE")
         }
 
         # --- 5. PROGRESS & SIDEBAR ---
