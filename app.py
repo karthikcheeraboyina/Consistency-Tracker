@@ -2,44 +2,38 @@ import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 import datetime
+import pandas as pd
 
 # --- 1. PROFESSIONAL UI CONFIGURATION ---
-st.set_page_config(page_title="2026 Mission Control", page_icon="🚀", layout="centered")
+st.set_page_config(page_title="2026 Mission Control", page_icon="🚀", layout="wide")
 
-# Custom CSS for a sleek, modern Developer Dashboard
 st.markdown("""
     <style>
-    .main { background-color: #0e1117; }
-    .stButton>button {
-        border-radius: 12px;
-        height: 3.5em;
-        background-color: #161b22;
-        color: #c9d1d9;
-        border: 1px solid #30363d;
-        font-weight: 500;
-        transition: all 0.3s ease;
-    }
-    .stButton>button:hover {
-        border-color: #58a6ff;
-        color: #58a6ff;
+    .main { background-color: #0d1117; }
+    div.stButton > button:first-child {
         background-color: #21262d;
-        transform: translateY(-2px);
+        color: #58a6ff;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        transition: 0.3s;
     }
-    .stProgress > div > div > div > div { background-color: #238636; }
-    h1 { color: #58a6ff; font-family: 'Inter', sans-serif; }
+    div.stButton > button:hover {
+        border-color: #58a6ff;
+        background-color: #30363d;
+    }
+    .status-card {
+        background-color: #161b22;
+        padding: 15px;
+        border-radius: 10px;
+        border: 1px solid #30363d;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🚀 2026 Mission Control")
-st.caption("Consistency is the bridge between goals and accomplishment.")
-
 # --- 2. THE DIRECT CLOUD CONNECTION ---
-scope = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
+scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
-@st.cache_resource # Keeps the connection alive for speed
+@st.cache_resource
 def connect_to_sheet():
     try:
         creds_dict = dict(st.secrets["gcp_service_account"])
@@ -47,11 +41,9 @@ def connect_to_sheet():
         creds = Credentials.from_service_account_info(info=creds_dict, scopes=scope)
         client = gspread.authorize(creds)
         
-        # --- ACTION REQUIRED: PASTE YOUR ID HERE ---
+        # YOUR SHEET ID
         SHEET_ID = "1RSvGxbjWqO1tNlRYbEg6ck3b4G_KYqO3v5OwjVGoyWw" 
-        
-        spreadsheet = client.open_by_key(SHEET_ID)
-        return spreadsheet.worksheet("Daily Log")
+        return client.open_by_key(SHEET_ID).worksheet("Daily Log")
     except Exception as e:
         st.error(f"📡 Connection Failed: {str(e)}")
         return None
@@ -59,57 +51,85 @@ def connect_to_sheet():
 sheet = connect_to_sheet()
 
 if sheet:
-    # --- 3. SMART DATE LOGIC ---
-    # We match your sheet's format: D/M/YYYY (e.g., 3/1/2026)
-    today_sheet_format = datetime.date.today().strftime("%-d/%-m/%Y") 
+    # --- 3. UNIVERSAL DATE LOGIC ---
+    # We generate multiple formats to ensure we find a match regardless of leading zeros
+    today = datetime.date.today()
+    possible_formats = [today.strftime("%-d/%-m/%Y"), today.strftime("%d/%m/%Y"), today.strftime("%#d/%#m/%Y")]
     
-    # Get all dates from Row 1
     dates_row = sheet.row_values(1, value_render_option='FORMATTED_VALUE')
     clean_dates = [str(d).strip() for d in dates_row]
 
-    if today_sheet_format in clean_dates:
-        col_idx = clean_dates.index(today_sheet_format) + 1
-        
-        # Get tasks from Column A and current status for progress bar
+    col_idx = None
+    for fmt in possible_formats:
+        if fmt in clean_dates:
+            col_idx = clean_dates.index(fmt) + 1
+            current_fmt = fmt
+            break
+
+    if col_idx:
+        # Fetching Data
         tasks = sheet.col_values(1)[1:17] 
         current_status = sheet.col_values(col_idx)[1:17]
         
-        # Calculate Progress
-        completed_count = current_status.count("TRUE")
-        progress_perc = completed_count / 16
+        # --- 4. INTEGRATED A-B-C-D LOGIC (From your Excel Query) ---
+        # Fetching last 10 columns for analysis
+        start_col = max(2, col_idx - 9)
+        history_range = sheet.get_values(start_col_index=start_col, end_col_index=col_idx, start_row_index=2, end_row_index=17)
         
-        # --- 4. DASHBOARD UI ---
-        st.sidebar.metric("Today's Progress", f"{int(progress_perc * 100)}%")
-        st.sidebar.progress(progress_perc)
-        st.sidebar.write(f"📅 Logged as: **{today_sheet_format}**")
-        
-        if st.sidebar.button("🔄 Refresh Data"):
-            st.rerun()
+        # Convert to flat list to count A, B, C, D
+        flat_history = [item for sublist in history_range for item in sublist]
+        stats = {
+            "A (High)": flat_history.count("A"),
+            "B (Med)": flat_history.count("B"),
+            "C (Low)": flat_history.count("C"),
+            "D (Done)": flat_history.count("D")
+        }
 
-        st.subheader(f"Today's Objectives")
+        # --- 5. SIDEBAR & PROGRESS ---
+        completed_count = current_status.count("TRUE") + current_status.count("D")
+        progress_perc = min(completed_count / 16, 1.0)
         
-        # Layout buttons in two columns for a neat grid on mobile
-        col1, col2 = st.columns(2)
-        
+        with st.sidebar:
+            st.title("👨‍💻 Developer Hub")
+            st.metric("Daily Completion", f"{int(progress_perc * 100)}%")
+            st.progress(progress_perc)
+            
+            st.divider()
+            st.subheader("📊 10-Day Intensity (A-D)")
+            for label, val in stats.items():
+                st.write(f"{label}: **{val}**")
+            
+            st.divider()
+            st.warning("⚠️ **Apps Script Alert**\nFix `2026_HardLock` by removing `getUi()` to stop daily error emails.")
+
+        # --- 6. MAIN DASHBOARD ---
+        st.title("🚀 2026 Mission Control")
+        st.write(f"Logged as: `{current_fmt}` | Active Station: `{today.strftime('%A')}`")
+
+        if progress_perc == 1.0:
+            st.balloons()
+            st.success("Target Achieved. All daily logs synced to Cloud.")
+
+        cols = st.columns(2)
         for i, task in enumerate(tasks):
-            # Check if already done to change the label
-            is_done = i < len(current_status) and current_status[i] == "TRUE"
-            label = f"🔥 {task}" if is_done else f"◽ {task}"
+            # Checking if status is TRUE or D (Done)
+            is_done = i < len(current_status) and (current_status[i] in ["TRUE", "D"])
             
-            # Place half in col1, half in col2
-            target_col = col1 if i % 2 == 0 else col2
-            
-            if target_col.button(label, key=f"btn_{i}", use_container_width=True, disabled=is_done):
-                with st.spinner("Syncing..."):
-                    sheet.update_cell(i + 2, col_idx, "TRUE")
-                    st.toast(f"{task} Logged!", icon="✅")
-                    st.rerun() # Refresh to show progress bar update
-
+            with cols[i % 2]:
+                if is_done:
+                    st.markdown(f"""<div class='status-card' style='border-left: 5px solid #238636;'>
+                                    <b>✅ {task}</b><br><small style='color:#8b949e;'>Synced to Sheet</small>
+                                 </div>""", unsafe_allow_html=True)
+                    st.write("") # Padding
+                else:
+                    if st.button(f"◽ {task}", key=f"btn_{i}", use_container_width=True):
+                        with st.spinner("Pushing to GSheets..."):
+                            sheet.update_cell(i + 2, col_idx, "TRUE")
+                            st.toast(f"Task Verified: {task}")
+                            st.rerun()
     else:
-        st.warning(f"⚠️ Date {today_sheet_format} not found in Row 1.")
-        st.info(f"Python sees: {clean_dates[:5]}...")
-        st.write("Ensure Row 1 has dates formatted as 1/1/2026, 2/1/2026, etc.")
+        st.error(f"Date not found. Expected {possible_formats[0]}")
+        st.info(f"Sheet Headers detected: {clean_dates[:5]}...")
 
-# --- 5. FOOTER ---
 st.divider()
-st.caption("2026 Career Transition Tracker | Created by Karthik")
+st.caption("v2.1 Build | Python 3.11 | Google Cloud Engine | Restricted Access")
