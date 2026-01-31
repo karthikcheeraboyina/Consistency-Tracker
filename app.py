@@ -1,8 +1,8 @@
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
+from gspread.utils import rowcol_to_a1  # Essential for converting numbers to A1 letters
 import datetime
-import pandas as pd
 
 # --- 1. PROFESSIONAL UI CONFIGURATION ---
 st.set_page_config(page_title="2026 Mission Control", page_icon="🚀", layout="wide")
@@ -43,7 +43,8 @@ def connect_to_sheet():
         
         # YOUR SHEET ID
         SHEET_ID = "1RSvGxbjWqO1tNlRYbEg6ck3b4G_KYqO3v5OwjVGoyWw" 
-        return client.open_by_key(SHEET_ID).worksheet("Daily Log")
+        spreadsheet = client.open_by_key(SHEET_ID)
+        return spreadsheet.worksheet("Daily Log")
     except Exception as e:
         st.error(f"📡 Connection Failed: {str(e)}")
         return None
@@ -52,14 +53,15 @@ sheet = connect_to_sheet()
 
 if sheet:
     # --- 3. UNIVERSAL DATE LOGIC ---
-    # We generate multiple formats to ensure we find a match regardless of leading zeros
     today = datetime.date.today()
+    # Checking common formats (d/m/yyyy and dd/mm/yyyy)
     possible_formats = [today.strftime("%-d/%-m/%Y"), today.strftime("%d/%m/%Y"), today.strftime("%#d/%#m/%Y")]
     
     dates_row = sheet.row_values(1, value_render_option='FORMATTED_VALUE')
     clean_dates = [str(d).strip() for d in dates_row]
 
     col_idx = None
+    current_fmt = None
     for fmt in possible_formats:
         if fmt in clean_dates:
             col_idx = clean_dates.index(fmt) + 1
@@ -67,16 +69,21 @@ if sheet:
             break
 
     if col_idx:
-        # Fetching Data
+        # Fetching Column A (Tasks) and the current column's status
         tasks = sheet.col_values(1)[1:17] 
         current_status = sheet.col_values(col_idx)[1:17]
         
-        # --- 4. INTEGRATED A-B-C-D LOGIC (From your Excel Query) ---
-        # Fetching last 10 columns for analysis
+        # --- 4. INTEGRATED A-B-C-D LOGIC (Fixed for gspread) ---
+        # We grab the last 10 columns for analysis
         start_col = max(2, col_idx - 9)
-        history_range = sheet.get_values(start_col_index=start_col, end_col_index=col_idx, start_row_index=2, end_row_index=17)
         
-        # Convert to flat list to count A, B, C, D
+        # Create a range string like "B2:K17"
+        range_to_fetch = f"{rowcol_to_a1(2, start_col)}:{rowcol_to_a1(17, col_idx)}"
+        
+        # Get values using the A1 range
+        history_range = sheet.get(range_to_fetch)
+        
+        # Flatten the list of lists to count values
         flat_history = [item for sublist in history_range for item in sublist]
         stats = {
             "A (High)": flat_history.count("A"),
@@ -86,6 +93,7 @@ if sheet:
         }
 
         # --- 5. SIDEBAR & PROGRESS ---
+        # We consider "TRUE" or "D" as a completed task
         completed_count = current_status.count("TRUE") + current_status.count("D")
         progress_perc = min(completed_count / 16, 1.0)
         
@@ -100,7 +108,10 @@ if sheet:
                 st.write(f"{label}: **{val}**")
             
             st.divider()
-            st.warning("⚠️ **Apps Script Alert**\nFix `2026_HardLock` by removing `getUi()` to stop daily error emails.")
+            if st.button("🔄 Sync with Cloud"):
+                st.rerun()
+            
+            st.info("💡 **Quick Tip:** To stop failure emails, remove `getUi()` from your Google Apps Script editor.")
 
         # --- 6. MAIN DASHBOARD ---
         st.title("🚀 2026 Mission Control")
@@ -108,28 +119,32 @@ if sheet:
 
         if progress_perc == 1.0:
             st.balloons()
-            st.success("Target Achieved. All daily logs synced to Cloud.")
+            st.success("Target Achieved. All daily logs synced.")
 
         cols = st.columns(2)
         for i, task in enumerate(tasks):
-            # Checking if status is TRUE or D (Done)
-            is_done = i < len(current_status) and (current_status[i] in ["TRUE", "D"])
+            # Check if task is already marked done in the sheet
+            is_done = False
+            if i < len(current_status):
+                if current_status[i] in ["TRUE", "D"]:
+                    is_done = True
             
             with cols[i % 2]:
                 if is_done:
                     st.markdown(f"""<div class='status-card' style='border-left: 5px solid #238636;'>
-                                    <b>✅ {task}</b><br><small style='color:#8b949e;'>Synced to Sheet</small>
+                                    <b>✅ {task}</b><br><small style='color:#8b949e;'>Synced to Cloud</small>
                                  </div>""", unsafe_allow_html=True)
-                    st.write("") # Padding
+                    st.write("") 
                 else:
                     if st.button(f"◽ {task}", key=f"btn_{i}", use_container_width=True):
-                        with st.spinner("Pushing to GSheets..."):
+                        with st.spinner("Pushing update..."):
                             sheet.update_cell(i + 2, col_idx, "TRUE")
-                            st.toast(f"Task Verified: {task}")
+                            st.toast(f"Logged: {task}")
                             st.rerun()
     else:
-        st.error(f"Date not found. Expected {possible_formats[0]}")
-        st.info(f"Sheet Headers detected: {clean_dates[:5]}...")
+        st.error(f"Date not found in Sheet. Checked: {possible_formats}")
+        st.info(f"Make sure Row 1 of your sheet has dates formatted like 31/1/2026.")
 
+# --- 7. FOOTER ---
 st.divider()
-st.caption("v2.1 Build | Python 3.11 | Google Cloud Engine | Restricted Access")
+st.caption("2026 Consistency Tracker v2.2 | Deployment: Streamlit Cloud | Engine: Python 3.13")
